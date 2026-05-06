@@ -70,6 +70,13 @@ export function detectWorkspaces(root: string): string[] {
   }
 }
 
+/**
+ * Returns only the resolved env files that exist on disk.
+ */
+export function resolveExistingEnvFiles(options: ResolveOptions = {}): ResolvedEnvFile[] {
+  return resolveEnvFiles(options).filter((entry) => entry.exists);
+}
+
 function expandGlob(root: string, pattern: string): string[] {
   // Basic glob: supports trailing /* wildcard
   if (pattern.endsWith('/*')) {
