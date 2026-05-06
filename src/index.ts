@@ -1,36 +1,45 @@
-export { loadEnvChain } from './loader';
-export type { LoadOptions, LoadResult } from './loader';
+import { loadEnvChain } from './loader';
+import { validateEnv, assertEnv, ValidationResult } from './validator';
+import type { ZodSchema } from 'zod';
+
+export interface EnvChainOptions {
+  files?: string[];
+  cwd?: string;
+  required?: string[] | ZodSchema;
+  strict?: boolean;
+}
+
+export interface EnvChainResult {
+  env: Record<string, string | undefined>;
+  validation?: ValidationResult;
+}
 
 /**
- * Convenience function: load env chain with sensible defaults for monorepos.
- * Loads from workspace root and current package directory in order.
+ * Initialize envchain: load .env files in order and optionally validate the result.
  */
-export function init(options: {
-  root?: string;
-  cwd?: string;
-  env?: string;
-  override?: boolean;
-} = {}): import('./loader').LoadResult {
-  const { loadEnvChain } = require('./loader');
+export function init(options: EnvChainOptions = {}): EnvChainResult {
+  const {
+    files = ['.env', '.env.local'],
+    cwd = process.cwd(),
+    required,
+    strict = false,
+  } = options;
 
-  const cwd = options.cwd ?? process.cwd();
-  const root = options.root ?? cwd;
-  const env = options.env ?? process.env.NODE_ENV ?? 'development';
-  const override = options.override ?? true;
+  const env = loadEnvChain({ files, cwd });
 
-  const files: string[] = [
-    // Root-level base env
-    `${root}/.env`,
-    `${root}/.env.${env}`,
-    // Package-level overrides (only added if different from root)
-    ...(cwd !== root
-      ? [
-          `${cwd}/.env`,
-          `${cwd}/.env.${env}`,
-          `${cwd}/.env.local`,
-        ]
-      : [`${root}/.env.local`]),
-  ];
+  if (!required) {
+    return { env };
+  }
 
-  return loadEnvChain({ files, override });
+  if (strict) {
+    assertEnv(env, required as string[] | ZodSchema);
+    return { env };
+  }
+
+  const validation = validateEnv(env, required as string[] | ZodSchema);
+  return { env, validation };
 }
+
+export { loadEnvChain } from './loader';
+export { validateEnv, assertEnv } from './validator';
+export type { ValidationResult } from './validator';
