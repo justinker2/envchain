@@ -1,64 +1,89 @@
-import { ResolveOptions, resolveEnvFiles } from './resolver';
-import { MergeOptions, MergeResult, mergeEnvFiles, applyToProcess } from './merger';
-import { validateEnv } from './validator';
+import { resolveEnvFiles } from "./resolver";
+import { loadEnvChain } from "./loader";
+import { mergeEnvFiles, applyToProcess } from "./merger";
+import { validateEnv } from "./validator";
+import {
+  getCacheDir,
+  readCache,
+  writeCache,
+  isCacheValid,
+  updateCacheEntry,
+  CacheStore,
+} from "./cache";
 
-export interface PipelineOptions extends ResolveOptions, MergeOptions {
-  /** Keys that must be present after merging */
+export interface PipelineOptions {
+  root?: string;
+  patterns?: string[];
   required?: string[];
-  /** Apply merged env to process.env automatically */
-  apply?: boolean;
-  /** Suppress console output */
-  silent?: boolean;
+  applyToEnv?: boolean;
+  useCache?: boolean;
 }
 
-export interface PipelineResult extends MergeResult {
-  missingKeys: string[];
-  valid: boolean;
+export interface PipelineResult {
+  env: Record<string, string>;
+  files: string[];
+  workspaces: number;
+  fromCache: boolean;
 }
 
-/**
- * Full pipeline: resolve → merge → validate → (optionally) apply.
- */
-export function runPipeline(options: PipelineOptions = {}): PipelineResult {
-  const { required = [], apply = false, silent = false, ...rest } = options;
+export function countWorkspaces(files: string[]): number {
+  const dirs = new Set(files.map((f) => f.replace(/[\\/][^\\/]+$/, "")));
+  return dirs.size;
+}
 
-  // 1. Resolve
-  const resolved = resolveEnvFiles(rest);
+export async function runPipeline(
+  options: PipelineOptions = {}
+): Promise<PipelineResult> {
+  const {
+    root = process.cwd(),
+    patterns,
+    required = [],
+    applyToEnv = true,
+    useCache = false,
+  } = options;
 
-  if (!silent) {
-    const existing = resolved.filter((f) => f.exists);
-    console.log(`[envchain] Found ${existing.length} env file(s) across ${countWorkspaces(resolved)} workspace(s).`);
+  const files = await resolveEnvFiles({ root, patterns });
+  const cacheDir = getCacheDir(root);
+  let store: CacheStore = useCache ? readCache(cacheDir) : {};
+
+  const allCached =
+    useCache &&
+    files.length > 0 &&
+    files.every((f) => isCacheValid(f, store));
+
+  if (allCached) {
+    const cachedEnv = files.reduce<Record<string, string>>((acc, f) => {
+      return { ...acc, ...store[f].env };
+    }, {});
+
+    if (required.length > 0) validateEnv(cachedEnv, required);
+    if (applyToEnv) applyToProcess(cachedEnv);
+
+    return {
+      env: cachedEnv,
+      files,
+      workspaces: countWorkspaces(files),
+      fromCache: true,
+    };
   }
 
-  // 2. Merge
-  const mergeResult = mergeEnvFiles(resolved, rest);
+  const parsed = await loadEnvChain(files);
+  const env = mergeEnvFiles(parsed);
 
-  // 3. Validate
-  const missingKeys: string[] = [];
-  if (required.length > 0) {
-    const validation = validateEnv(mergeResult.env, required);
-    missingKeys.push(...(validation.missing ?? []));
+  if (required.length > 0) validateEnv(env, required);
+  if (applyToEnv) applyToProcess(env);
 
-    if (!silent && missingKeys.length > 0) {
-      console.warn(`[envchain] Missing required keys: ${missingKeys.join(', ')}`);
+  if (useCache) {
+    for (const [filePath, fileEnv] of Object.entries(parsed)) {
+      store = updateCacheEntry(filePath, fileEnv, store);
     }
-  }
-
-  // 4. Apply
-  if (apply) {
-    applyToProcess(mergeResult);
-    if (!silent) {
-      console.log(`[envchain] Applied ${Object.keys(mergeResult.env).length} variable(s) to process.env.`);
-    }
+    writeCache(cacheDir, store);
   }
 
   return {
-    ...mergeResult,
-    missingKeys,
-    valid: missingKeys.length === 0,
+    env,
+    files,
+    workspaces: countWorkspaces(files),
+    fromCache: false,
   };
-}
-
-function countWorkspaces(files: ReturnType<typeof resolveEnvFiles>): number {
-  return new Set(files.map((f) => f.workspace)).size;
 }
