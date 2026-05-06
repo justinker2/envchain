@@ -63,6 +63,12 @@ describe('mergeEnvFiles', () => {
     const result = mergeEnvFiles(files);
     expect(result.sources[0].keys).toEqual(expect.arrayContaining(['A', 'B']));
   });
+
+  it('returns empty env and sources for an empty file list', () => {
+    const result = mergeEnvFiles([]);
+    expect(result.env).toEqual({});
+    expect(result.sources).toHaveLength(0);
+  });
 });
 
 describe('applyToProcess', () => {
@@ -80,5 +86,15 @@ describe('applyToProcess', () => {
     applyToProcess({ env: { [key]: 'new' }, sources: [] }, false);
     expect(process.env[key]).toBe('original');
     delete process.env[key];
+  });
+
+  it('sets multiple keys on process.env in a single call', () => {
+    const keys = ['__ENVCHAIN_MULTI_A__', '__ENVCHAIN_MULTI_B__', '__ENVCHAIN_MULTI_C__'];
+    keys.forEach((k) => delete process.env[k]);
+    applyToProcess({ env: { [keys[0]]: 'a', [keys[1]]: 'b', [keys[2]]: 'c' }, sources: [] });
+    expect(process.env[keys[0]]).toBe('a');
+    expect(process.env[keys[1]]).toBe('b');
+    expect(process.env[keys[2]]).toBe('c');
+    keys.forEach((k) => delete process.env[k]);
   });
 });
