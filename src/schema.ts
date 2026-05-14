@@ -50,3 +50,23 @@ export function buildSchemaFromKeys(
 
   return z.object(shape);
 }
+
+/**
+ * Formats a SchemaValidationResult's errors into a human-readable string.
+ * Returns null if the result was successful or contains no errors.
+ *
+ * @example
+ * const msg = formatValidationErrors(result);
+ * if (msg) console.error(msg);
+ */
+export function formatValidationErrors(
+  result: SchemaValidationResult
+): string | null {
+  if (result.success || !result.errors || result.errors.length === 0) {
+    return null;
+  }
+
+  return result.errors
+    .map(({ key, message }) => `  - ${key}: ${message}`)
+    .join("\n");
+}
